@@ -9,10 +9,27 @@ namespace SSTUTools
     {
         #region ConfigNode extension methods
 
-        public static String[] GetStringValues(this ConfigNode node, String name)
+        public static String[] GetStringValues(this ConfigNode node, String name, bool reverse = false)
         {
-            String[] values = node.GetValues(name);
-            return values == null ? new String[0] : values;
+            string[] values = node.GetValues(name);
+            int l = values.Length;
+            if (reverse)
+            {
+                int len = values.Length;
+                string[] returnValues = new string[len];
+                for (int i = 0, k = len - 1; i < len; i++, k--)
+                {
+                    returnValues[i] = values[k];
+                }
+                return returnValues;
+            }
+            return values;
+        }
+
+        public static string[] GetStringValues(this ConfigNode node, string name, string[] defaults, bool reverse = false)
+        {
+            if (node.HasValue(name)) { return node.GetStringValues(name, reverse); }
+            return defaults;
         }
 
         public static string GetStringValue(this ConfigNode node, String name, String defaultValue)
@@ -248,6 +265,19 @@ namespace SSTUTools
             return curve;
         }
 
+        public static ConfigNode getNode(this FloatCurve curve, string name)
+        {
+            ConfigNode node = new ConfigNode(name);
+            int len = curve.Curve.length;
+            Keyframe[] keys = curve.Curve.keys;
+            for (int i = 0; i < len; i++)
+            {
+                Keyframe key = keys[i];
+                node.AddValue("key", key.time + " " + key.value + " " + key.inTangent + " " + key.outTangent);
+            }
+            return node;
+        }
+
         public static Color getColor(this ConfigNode node, String name)
         {
             Color color = new Color();
@@ -268,6 +298,13 @@ namespace SSTUTools
             color.b = vals[2]/255f;
             color.a = vals[3]/255f;
             return color;
+        }
+
+        public static Axis getAxis(this ConfigNode node, string name, Axis def = Axis.ZPlus)
+        {
+            string val = node.GetStringValue(name, def.ToString());
+            Axis axis = (Axis)Enum.Parse(typeof(Axis), val, true);
+            return axis;
         }
 
         #endregion
@@ -419,9 +456,63 @@ namespace SSTUTools
             return false;
         }
 
+        public static Vector3 getTransformAxis(this Transform transform, Axis axis)
+        {
+            switch (axis)
+            {
+                case Axis.XPlus:
+                    return transform.right;
+                case Axis.XNeg:
+                    return -transform.right;
+                case Axis.YPlus:
+                    return transform.up;
+                case Axis.YNeg:
+                    return -transform.up;
+                case Axis.ZPlus:
+                    return transform.forward;
+                case Axis.ZNeg:
+                    return -transform.forward;
+                default:
+                    return transform.forward;
+            }
+        }
+
+        public static Vector3 getLocalAxis(this Transform transform, Axis axis)
+        {
+            switch (axis)
+            {
+                case Axis.XPlus:
+                    return Vector3.right;
+                case Axis.XNeg:
+                    return Vector3.left;
+                case Axis.YPlus:
+                    return Vector3.up;
+                case Axis.YNeg:
+                    return Vector3.down;
+                case Axis.ZPlus:
+                    return Vector3.forward;
+                case Axis.ZNeg:
+                    return Vector3.back;
+                default:
+                    return Vector3.forward;
+            }
+        }
+
         #endregion
 
         #region PartModule extensionMethods
+
+        public static void setFieldEnabledEditor(this PartModule module, string fieldName, bool active)
+        {
+            BaseField f = module.Fields[fieldName];
+            if (f != null) { f.guiActiveEditor = active; }
+        }
+
+        public static void setFieldEnabledFlight(this PartModule module, string fieldName, bool active)
+        {
+            BaseField f = module.Fields[fieldName];
+            if (f != null) { f.guiActive = active; }
+        }
 
         public static void updateUIFloatEditControl(this PartModule module, string fieldName, float min, float max, float incLarge, float incSmall, float incSlide, bool forceUpdate, float forceVal)
         {
@@ -498,21 +589,33 @@ namespace SSTUTools
             }
         }
 
+        /// <summary>
+        /// FOR EDITOR USE ONLY - will not update or activate UI fields in flight scene
+        /// </summary>
+        /// <param name="module"></param>
+        /// <param name="fieldName"></param>
+        /// <param name="options"></param>
+        /// <param name="display"></param>
+        /// <param name="forceUpdate"></param>
+        /// <param name="forceVal"></param>
         public static void updateUIChooseOptionControl(this PartModule module, string fieldName, string[] options, string[] display, bool forceUpdate, string forceVal="")
         {
             if (display.Length == 0 && options.Length > 0) { display = new string[] { "NONE" }; }
             if (options.Length == 0) { options = new string[] { "NONE" }; }
+            module.Fields[fieldName].guiActiveEditor = options.Length > 1;
             UI_ChooseOption widget = null;
             if (HighLogic.LoadedSceneIsEditor)
             {
                 widget = (UI_ChooseOption)module.Fields[fieldName].uiControlEditor;
             }
-            else if (HighLogic.LoadedSceneIsFlight)
+            else
             {
-                widget = (UI_ChooseOption)module.Fields[fieldName].uiControlFlight;
+                return;
             }
-            else { return; }
-            if (widget == null) { return; }
+            if (widget == null)
+            {
+                return;
+            }
             widget.display = display;
             widget.options = options;
             if (forceUpdate && widget.partActionItem != null)
@@ -660,6 +763,47 @@ namespace SSTUTools
 
         #region Generic extension and Utiltiy methods
 
+        /// <summary>
+        /// Return true/false if the input array contains at least one element that satsifies the input predicate.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="array"></param>
+        /// <param name="predicate"></param>
+        /// <returns></returns>
+        public static bool Exists<T>(this T[] array, Func<T,bool> predicate)
+        {
+            int len = array.Length;
+            for (int i = 0; i < len; i++)
+            {
+                if (predicate(array[i])) { return true; }
+            }
+            return false;
+        }
+
+        public static T Find<T>(this T[] array, Func<T, bool> predicate)
+        {
+            int len = array.Length;
+            for (int i = 0; i < len; i++)
+            {
+                if (array[i] == null)
+                {
+                    MonoBehaviour.print("ERROR: Null value in array in Find method, at index: " + i);
+                }
+                if (predicate(array[i]))
+                {
+                    return array[i];
+                }
+            }
+            //return default in order to properly handle value types (structs)
+            //should return either null for reference types or default value for structs
+            return default(T);
+        }
+
+
+        #endregion
+
+        #region FloatCurve extensions
+
         public static String Print(this FloatCurve curve)
         {
             String output = "";
@@ -670,17 +814,39 @@ namespace SSTUTools
             return output;
         }
 
-        public static void logDebug(this MonoBehaviour module, String message)
+        public static string ToStringSingleLine(this FloatCurve curve)
         {
-            MonoBehaviour.print("SSTU-DEBUG: " + message);
+            string data = "";
+            int len = curve.Curve.length;
+            Keyframe key;
+            for (int i = 0; i < len; i++)
+            {
+                key = curve.Curve.keys[i];
+                if (i > 0) { data = data + ":"; }
+                data = data + key.time + "," + key.value + "," + key.inTangent + "," + key.outTangent;
+            }
+            return data;
         }
 
-        public static void logError(this MonoBehaviour module, String message)
+        public static void loadSingleLine(this FloatCurve curve, string input)
         {
-            MonoBehaviour.print("SSTU-ERROR: " + message);
+            string[] keySplits = input.Split(':');
+            string[] valSplits;
+            int len = keySplits.Length;
+            float key, value, inTan, outTan;
+            for (int i = 0; i < len; i++)
+            {
+                valSplits = keySplits[i].Split(',');
+                key = float.Parse(valSplits[0]);
+                value = float.Parse(valSplits[1]);
+                inTan = float.Parse(valSplits[2]);
+                outTan = float.Parse(valSplits[3]);
+                curve.Add(key, value, inTan, outTan);
+            }
         }
 
         #endregion
+
     }
 }
 

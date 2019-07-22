@@ -139,5 +139,12 @@ namespace SSTUTools
             orientation = new Vector3(SSTUUtils.safeParseFloat(dataVals[3].Trim()), SSTUUtils.safeParseFloat(dataVals[4].Trim()), SSTUUtils.safeParseFloat(dataVals[5].Trim()));
             size = dataVals.Length > 6 ? SSTUUtils.safeParseInt(dataVals[6]) : 4;
         }
+
+        public AttachNodeBaseData(float x, float y, float z, float rx, float ry, float rz, float size)
+        {
+            position = new Vector3(x, y, z);
+            orientation = new Vector3(rx, ry, rz);
+            this.size = Mathf.RoundToInt(size);
+        }
     }
 }

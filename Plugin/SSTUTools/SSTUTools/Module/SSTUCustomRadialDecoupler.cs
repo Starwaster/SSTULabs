@@ -274,12 +274,10 @@ namespace SSTUTools.Module
         {
             float resourceScalar = Mathf.Pow(getScale(), thrustScalePower);
             float currentVolume = resourceVolume * resourceScalar;
-            if (!SSTUModInterop.onPartFuelVolumeUpdate(part, currentVolume*1000))
-            {
-                SSTUResourceList list = new SSTUResourceList();
-                fuelType.addResources(list, currentVolume);
-                list.setResourcesToPart(part);
-            }
+
+            SSTUResourceList list = new SSTUResourceList();
+            fuelType.addResources(list, currentVolume);
+            list.setResourcesToPart(part, 1, false);
         }
 
         private void updateMassAndCost()

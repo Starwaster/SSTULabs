@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace SSTUTools
 {
-    public class SSTUAirstreamShield : PartModule, IAirstreamShield, ISSTUAnimatedModule
+    public class SSTUAirstreamShield : PartModule, IAirstreamShield
     {
         
         [KSPField]
@@ -13,6 +13,9 @@ namespace SSTUTools
 
         [KSPField]
         public bool useAttachNodeBottom = false;
+
+        [KSPField]
+        public string animationID = string.Empty;
         
         [KSPField]
         public float topY;
@@ -25,9 +28,6 @@ namespace SSTUTools
 
         [KSPField]
         public float bottomRadius;
-
-        [KSPField]
-        public string animationID = string.Empty;
         
         [KSPField(guiName = "Shielded Parts", guiActive = true, guiActiveEditor = true)]
         public int partsShielded = 0;
@@ -35,8 +35,7 @@ namespace SSTUTools
         private List<Part> shieldedParts = new List<Part>();
 
         private List<AirstreamShieldArea> shieldedAreas = new List<AirstreamShieldArea>();
-
-        private SSTUAnimateControlled animationControl;
+        
         private AirstreamShieldArea baseArea;
 
         private bool needsUpdate = true;
@@ -68,11 +67,6 @@ namespace SSTUTools
         public void Start()
         {
             needsUpdate = true;
-            if (!string.IsNullOrEmpty(animationID))
-            {
-                animationControl = SSTUAnimateControlled.setupAnimationController(part, animationID, this);
-                if (animationControl != null) { onAnimationStateChange(animationControl.getAnimationState()); }
-            }
         }
 
         public void LateUpdate()
@@ -109,28 +103,6 @@ namespace SSTUTools
             return vessel;
         }
 
-        public void onAnimationStateChange(AnimState newState)
-        {
-            if (newState == AnimState.STOPPED_START)
-            {
-                if (baseArea != null)
-                {
-                    shieldedAreas.AddUnique(baseArea);
-                }
-            }
-            else if (newState == AnimState.STOPPED_END)
-            {
-                shieldedAreas.Remove(baseArea);
-            }
-            needsUpdate = true;
-        }
-
-        public void onModuleEnableChange(bool moduleEnabled)
-        {
-            shieldedAreas.Remove(baseArea);
-            needsUpdate = true;
-        }
-
         public void addShieldArea(String name, float topRad, float bottomRad, float topY, float bottomY, bool topNode, bool bottomNode)
         {
             AirstreamShieldArea area = shieldedAreas.Find(m => m.name == name);
@@ -147,11 +119,10 @@ namespace SSTUTools
             needsUpdate = true;
         }
 
-        private void updateShieldStatus()
+        public void updateShieldStatus()
         {
             clearShieldedParts();
             findShieldedParts();
-            //print("SSTUAirstreamShield - Updated shielding status, new shielded part count: " + partsShielded);
         }
 
         private void clearShieldedParts()
@@ -172,7 +143,26 @@ namespace SSTUTools
         private void findShieldedParts()
         {
             clearShieldedParts();
-            findShieldedPartsCylinder();
+            if (string.IsNullOrEmpty(animationID))
+            {
+                findShieldedPartsCylinder();
+            }
+            else
+            {
+                IScalarModule[] ism = part.GetComponents<IScalarModule>();
+                int len = ism.Length;
+                for (int i = 0; i < len; i++)
+                {
+                    if (ism[i].ScalarModuleID == animationID)
+                    {
+                        if (ism[i].GetScalar <= 0)//stopped and closed
+                        {
+                            findShieldedPartsCylinder();
+                        }
+                        break;//only care about the first matching animation module
+                    }
+                }
+            }
         }
 
         private void findShieldedPartsCylinder()
@@ -182,12 +172,12 @@ namespace SSTUTools
             for (int i = 0; i < len; i++)
             {
                 area = shieldedAreas[i];
-                if (area.useTopNode)//TODO find the top-most node(s) by Y level
+                if (area.useTopNode)
                 {
                     AttachNode node = part.FindAttachNode("top");
                     if (node != null && node.attachedPart == null) { continue; }
                 }
-                if (area.useBottomNode)//TODO find the bottom-most node(s) by Y level
+                if (area.useBottomNode)
                 {
                     AttachNode node = part.FindAttachNode("bottom");
                     if (node != null && node.attachedPart == null) { continue; }
@@ -200,12 +190,6 @@ namespace SSTUTools
                 shieldedParts[i].AddShield(this);
             }
             partsShielded = shieldedParts.Count;
-        }
-
-        //TODO check for shielded parts using mesh occlusion/containment rather than cylinder bounding containment
-        public static void findShieldedPartsMesh(Part basePart, String rootMeshName, List<Part> shieldedParts)
-        {
-            Bounds combinedBounds = SSTUUtils.getRendererBoundsRecursive(basePart.transform.FindRecursive(rootMeshName).gameObject);
         }
 
         //TODO clean this up to be easier to read/understand now that it is optimized for cylinder check only

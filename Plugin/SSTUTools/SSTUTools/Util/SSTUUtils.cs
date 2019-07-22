@@ -221,6 +221,18 @@ namespace SSTUTools
             return vals;
         }
 
+        public static int[] parseIntArray(string input)
+        {
+            string[] vals = parseCSV(input);
+            int len = vals.Length;
+            int[] iVals = new int[len];
+            for (int i = 0; i < len; i++)
+            {
+                iVals[i] = safeParseInt(vals[i]);
+            }
+            return iVals;
+        }
+
         public static float[] parseFloatArray(string input)
         {
             string[] strs = parseCSV(input);
@@ -323,13 +335,15 @@ namespace SSTUTools
         public static void destroyChildrenImmediate(Transform tr)
         {
             if (tr == null || tr.childCount <= 0) { return; }
-            
-            foreach (Transform child in tr)
+            int len = tr.childCount;
+            for (int i = len-1; i >=0; i--)
             {
+                Transform child = tr.GetChild(i);
                 if (child == null)
                 {
                     continue;
                 }
+                child.parent = null;
                 GameObject.DestroyImmediate(child.gameObject);
             }
         }
@@ -355,7 +369,7 @@ namespace SSTUTools
                     MeshRenderer r = (MeshRenderer)comp;
                     Material m = r.material;
                     Shader s = m == null ? null : m.shader;
-                    MonoBehaviour.print("Found Mesh Renderer component.  Mat/shader: "+m+" : "+s);
+                    MonoBehaviour.print("Found Mesh Rend : " + prefix + "* Mat: " + m +" :: Shader: "+s);
                 }
                 else
                 {

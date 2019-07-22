@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace SSTUTools
@@ -278,46 +279,46 @@ namespace SSTUTools
         /// </summary>
         /// <param name="part"></param>
         /// <param name="fill"></param>
-        public void setResourcesToPart(Part part)
+        public void setResourcesToPart(Part part, float modifier, bool keepExisting)
         {
-            int len = part.Resources.Count;
-            if (len == resourceList.Count)//potentially the same resources exist as we are trying to setup
+            removeUnusedResources(part);
+            int len = resourceList.Count;
+            foreach(ResourceListEntry rle in resourceList.Values)
             {
-                bool foundAll = true;                         
-                foreach (String name in resourceList.Keys)
-                {
-                    ResourceListEntry entry = resourceList[name];
-                    if (part.Resources.Contains(name))//go ahead and set them as found; if not all are found we'll delete them anyway...
-                    {                        
-                        PartResource pr = part.Resources[name];
-                        pr.maxAmount = entry.max;
-                        pr.amount = entry.fill;
-                    }
-                    else
-                    {
-                        foundAll = false;
-                        break;
-                    }
-                }
-                if (foundAll)
-                {
-                    SSTUModInterop.updatePartResourceDisplay(part);
-                    return;
-                }
-            }
-            part.Resources.dict.Clear();            
-            ConfigNode resourceNode;
-            foreach (String name in resourceList.Keys)
-            {
-                ResourceListEntry entry = resourceList[name];
-                resourceNode = new ConfigNode("RESOURCE");
-                resourceNode.AddValue("name", name);
-                resourceNode.AddValue("maxAmount", entry.max);
-                resourceNode.AddValue("amount", entry.fill);
-                part.AddResource(resourceNode);                
+                rle.applyToPart(part, modifier, keepExisting);
             }
             SSTUModInterop.updatePartResourceDisplay(part);
+            //GameEvents.onPartResourceListChange.Fire(part);
         }
+
+        private void removeUnusedResources(Part part)
+        {
+            int len = part.Resources.Count;
+            PartResource pr;
+            for (int i = len-1; i >=0; i--)
+            {
+                pr = part.Resources[i];
+                if (!contains(pr))
+                {
+                    part.Resources.Remove(pr);
+                }
+            }
+        }
+
+        private bool contains(PartResource pr)
+        {
+            return resourceList.Keys.Contains(pr.resourceName);
+        }
+
+        public static void partResourceDebug(Part part)
+        {
+            int len = part.Resources.Count;
+            for (int i = 0; i < len; i++)
+            {
+                MonoBehaviour.print(part.Resources[i].resourceName + " : " + part.Resources[i].amount+"/"+part.Resources[i].maxAmount);
+            }
+        }
+
     }
 
     public class ResourceListEntry
@@ -331,6 +332,64 @@ namespace SSTUTools
             this.fill = fill;
             this.max = max;
         }
+
+        public void applyToPart(Part part, float modifier, bool keepExistingAmount)
+        {
+            PartResource pr = part.Resources[name];
+            if (pr != null)
+            {
+                pr.maxAmount = max * modifier;
+                if (keepExistingAmount)
+                {
+                    pr.amount = Math.Min(pr.amount, pr.maxAmount);
+                }
+                else
+                {
+                    pr.amount = fill * modifier;
+                }                
+            }
+            else
+            {
+                ConfigNode resourceNode;
+                resourceNode = new ConfigNode("RESOURCE");
+                resourceNode.AddValue("name", name);
+                resourceNode.AddValue("maxAmount", max * modifier);
+                resourceNode.AddValue("amount", fill * modifier);
+                pr = part.AddResource(resourceNode);
+            }
+
+            //handle stock delta-v simulation resource setup
+            //SR resource code adapted from B9 code by @blowfishpro
+            //https://github.com/blowfishpro/B9PartSwitch/pull/110/files
+            PartResource sr = part.SimulationResources[name];
+            if (sr != null)
+            {
+
+                sr.maxAmount = max * modifier;
+                if (keepExistingAmount)
+                {
+                    sr.amount = Math.Min(pr.amount, pr.maxAmount);
+                }
+                else
+                {
+                    sr.amount = fill * modifier;
+                }
+            }
+            else
+            {
+                sr = new PartResource(pr);
+                sr.simulationResource = true;
+                part.SimulationResources.dict.Add(name.GetHashCode(), sr);
+            }
+        }
+
+        public bool equals(string resource) { return name == resource; }
+
+        public override string ToString()
+        {
+            return "ResourceListEntry: " + name + "-" + fill + "/" + max;
+        }
+
     }
 
 }

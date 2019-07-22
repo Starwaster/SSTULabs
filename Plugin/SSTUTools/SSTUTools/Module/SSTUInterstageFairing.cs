@@ -162,14 +162,6 @@ namespace SSTUTools
         [KSPField(guiName = "Fairing Mass", guiActiveEditor = true)]
         public float fairingMass;
 
-        [KSPField(isPersistant = true)]
-        public bool panelsJettisoned = false;
-
-        //are planels deployed and upper node decoupled?
-        //toggled to true as soon as deploy action is activated
-        [KSPField(isPersistant = true)]
-        public bool deployed = false;
-
         //is inner node decoupled?
         //toggled to true as soon as inner node is decoupled, only available after deployed=true
         [KSPField(isPersistant = true)]
@@ -180,16 +172,13 @@ namespace SSTUTools
         public float currentRotation = 0.0f;
 
         [KSPField(isPersistant = true)]
-        public bool animating = false;
-
-        [KSPField(isPersistant = true)]
-        public bool animatingClosed = false;
-
-        [KSPField(isPersistant = true)]
         public string customColorData = string.Empty;
 
         [KSPField(isPersistant = true)]
         public bool initializedColors = false;
+
+        [KSPField(isPersistant = true)]
+        public InterstageFairingState state = InterstageFairingState.RETRACTED;
 
         [Persistent]
         public string configNodeData = string.Empty;
@@ -200,10 +189,7 @@ namespace SSTUTools
 
         private bool initialized;
 
-        private InterstageFairingContainer fairingBase;        
-
-        //material used for procedural fairing, created from the texture references above
-        private Material fairingMaterial;
+        private InterstageFairingContainer fairingBase; 
 
         private RecoloringHandler recolorHandler;
 
@@ -274,7 +260,7 @@ namespace SSTUTools
         {
             this.actionWithSymmetry(m => 
             {
-                m.setPanelRotations(m.editorDeployed? deployedRotation : 0);
+                m.setPanelRotations(m.editorDeployed ? deployedRotation : 0);
             });
         }
 
@@ -366,7 +352,7 @@ namespace SSTUTools
 
         public override void OnStart(PartModule.StartState state)
         {
-            base.OnStart(state);            
+            base.OnStart(state);
             initialize();
             this.updateUIFloatEditControl(nameof(topDiameter), minDiameter, maxDiameter, topDiameterIncrement*2, topDiameterIncrement, topDiameterIncrement*0.05f, true, topDiameter);
             this.updateUIFloatEditControl(nameof(bottomDiameter), minDiameter, maxDiameter, bottomDiameterIncrement*2, bottomDiameterIncrement, bottomDiameterIncrement*0.05f, true, bottomDiameter);
@@ -385,12 +371,9 @@ namespace SSTUTools
             {
                 this.actionWithSymmetry(m => 
                 {
-                    if (!m.panelsJettisoned && (m.deployed || m.editorDeployed))
+                    if ((m.state==InterstageFairingState.DEPLOYED || m.state==InterstageFairingState.DEPLOYING || m.state==InterstageFairingState.RETRACTING) && m.currentRotation> m.deployedRotation)
                     {
-                        if (m.deployed)
-                        {
-                            m.currentRotation = m.deployedRotation;
-                        }
+                        m.currentRotation = m.deployedRotation;
                         m.recreateDragCubes();
                         m.setPanelRotations(m.deployedRotation);
                     }
@@ -436,10 +419,18 @@ namespace SSTUTools
         {
             if (HighLogic.LoadedSceneIsFlight)
             {
-                if (animating || animatingClosed)
+                if (state==InterstageFairingState.DEPLOYING || state==InterstageFairingState.RETRACTING)
                 {
                     updateAnimation();
                 }
+            }
+        }
+
+        public void LateUpdate()
+        {
+            if (HighLogic.LoadedSceneIsEditor)
+            {
+                fairingBase.setOpacity(editorTransparency ? 0.25f : 1);
             }
         }
 
@@ -508,7 +499,7 @@ namespace SSTUTools
         //IRecolorable override
         public TextureSet getSectionTexture(string section)
         {
-            return KSPShaderLoader.getTextureSet(currentTextureSet);
+            return TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
         }
 
         #endregion
@@ -517,15 +508,13 @@ namespace SSTUTools
 
         private void onDeployEvent()
         {
-            if(animatingClosed || (!deployed && !animating))
+            if (state == InterstageFairingState.RETRACTED || state == InterstageFairingState.RETRACTING)
             {
-                animating = true;
-                animatingClosed = false;
-                deployed = false;
+                state = InterstageFairingState.DEPLOYING;
                 if (autoDecoupleUpper)
                 {
                     decoupleByModule(topDecouplerModuleIndex);
-                }                
+                }
                 updateShieldStatus();
                 updateGuiState();
             }
@@ -533,18 +522,16 @@ namespace SSTUTools
 
         private void onRetractEvent()
         {
-            if (deployed || animating)
+            if (state == InterstageFairingState.DEPLOYING || state == InterstageFairingState.DEPLOYED)
             {
-                animatingClosed = true;
-                animating = false;
-                deployed = false;
+                state = InterstageFairingState.RETRACTING;
                 updateGuiState();
             }
         }
 
         private void onDecoupleEvent()
         {
-            if (deployed && !decoupled)
+            if (state==InterstageFairingState.DEPLOYED && !decoupled)
             {
                 decoupled = true;
                 decoupleByModule(internalDecouplerModuleIndex);
@@ -571,7 +558,7 @@ namespace SSTUTools
 
         private void setPanelRotations(float rotation)
         {
-            if (fairingBase != null && !panelsJettisoned)
+            if (fairingBase != null && state != InterstageFairingState.JETTISONED)
             {
                 fairingBase.setPanelRotations(rotation);
             }
@@ -579,34 +566,33 @@ namespace SSTUTools
 
         private void setPanelOpacity(float val)
         {
-            if (fairingBase != null && !panelsJettisoned) { fairingBase.setOpacity(val); }
+            if (fairingBase != null && state != InterstageFairingState.JETTISONED)
+            {
+                fairingBase.setOpacity(val);
+            }
         }
 
         private void updateAnimation()
         {
-            float dir = animating ? 1 : -1;
+            float dir = state==InterstageFairingState.DEPLOYING ? 1 : -1;
             float delta = TimeWarp.fixedDeltaTime * animationSpeed * dir;
             currentRotation += delta;
-            if (currentRotation >= deployedRotation)
+            if (state == InterstageFairingState.DEPLOYING && currentRotation >= deployedRotation)
             {
                 currentRotation = deployedRotation;
                 setPanelRotations(currentRotation);
-                animating = false;
-                animatingClosed = false;
-                deployed = true;
+                state = InterstageFairingState.DEPLOYED;
                 if (jettisonPanels)
                 {
                     jettisonFairingPanels();
                 }
                 updateGuiState();
             }
-            else if (currentRotation <= 0)
+            else if (state == InterstageFairingState.RETRACTING && currentRotation <= 0)
             {
                 currentRotation = 0;
                 setPanelRotations(currentRotation);
-                animating = false;
-                animatingClosed = false;
-                deployed = false;
+                state = InterstageFairingState.RETRACTED;
                 updateShieldStatus();
                 updateGuiState();
             }
@@ -632,7 +618,7 @@ namespace SSTUTools
 
         private void jettisonFairingPanels()
         {
-            panelsJettisoned = true;
+            state = InterstageFairingState.JETTISONED;
             fairingBase.jettisonPanels(part, 10, Vector3.forward, 0.1f);
         }
                 
@@ -661,26 +647,22 @@ namespace SSTUTools
         //create procedural panel sections for the current part configuration (radialSection count), with orientation set from base panel orientation
         private void createPanels()
         {
-            if (!panelsJettisoned)
-            {
-                float modelFairingScale = defaultFairingDiameter / defaultModelDiameter;
-                float bottomRadius = bottomDiameter * modelFairingScale * 0.5f;
-                float topRadius = topDiameter * 0.5f;
+            float modelFairingScale = defaultFairingDiameter / defaultModelDiameter;
+            float bottomRadius = bottomDiameter * modelFairingScale * 0.5f;
+            float topRadius = topDiameter * 0.5f;
 
-                fairingBase.clearProfile();
-                fairingBase.addRing(0, bottomRadius);
-                if (topRadius != bottomRadius && currentStraightHeight < currentHeight)
-                {
-                    fairingBase.addRing(currentStraightHeight, bottomRadius);
-                }
-                fairingBase.addRing(currentHeight, topDiameter * 0.5f);
-                fairingBase.generateColliders = this.generateColliders;
-                fairingBase.generateFairing();
-                fairingBase.setMaterial(fairingMaterial);
-                if (HighLogic.LoadedSceneIsEditor && editorTransparency) { setPanelOpacity(0.25f); }
-                else { setPanelOpacity(1.0f); }
-                updateTextureSet(false);
+            fairingBase.clearProfile();
+            fairingBase.addRing(0, bottomRadius);
+            if (topRadius != bottomRadius && currentStraightHeight < currentHeight)
+            {
+                fairingBase.addRing(currentStraightHeight, bottomRadius);
             }
+            fairingBase.addRing(currentHeight, topDiameter * 0.5f);
+            fairingBase.generateColliders = this.generateColliders;
+            fairingBase.generateFairing();
+            if (HighLogic.LoadedSceneIsEditor && editorTransparency) { setPanelOpacity(0.25f); }
+            else { setPanelOpacity(1.0f); }
+            updateTextureSet(false);
         }
 
         private void recreateDragCubes()
@@ -729,14 +711,13 @@ namespace SSTUTools
 
             ConfigNode node = SSTUConfigNodeUtils.parseConfigNode(configNodeData);
 
-            ConfigNode[] textureNodes = node.GetNodes("TEXTURESET");
-            string[] names = TextureSet.getTextureSetNames(textureNodes);
-            string[] titles = TextureSet.getTextureSetTitles(textureNodes);
-            TextureSet t = KSPShaderLoader.getTextureSet(currentTextureSet);
+            string[] names = node.GetStringValues("textureSet");
+            string[] titles = SSTUUtils.getNames(TexturesUnlimitedLoader.getTextureSets(names), m => m.title);
+            TextureSet t = TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
             if (t == null)
             {
                 currentTextureSet = names[0];
-                t = KSPShaderLoader.getTextureSet(currentTextureSet);
+                t = TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
                 initializedColors = false;
             }
             if (!initializedColors)
@@ -745,7 +726,6 @@ namespace SSTUTools
                 recolorHandler.setColorData(t.maskColors);
             }
             this.updateUIChooseOptionControl(nameof(currentTextureSet), names, titles, true, currentTextureSet);
-            fairingMaterial = t.textureData[0].createMaterial("SSTUFairingMaterial");
             
             Transform tr = part.transform.FindRecursive("model").FindOrCreate("PetalAdapterRoot");
             fairingBase = new InterstageFairingContainer(tr.gameObject, cylinderSides, numberOfPanels, wallThickness);
@@ -757,7 +737,7 @@ namespace SSTUTools
             validateStraightHeight();
             rebuildFairing(false);//will create fairing using default / previously saved fairing configuration
             setPanelRotations(currentRotation);
-            if (panelsJettisoned)
+            if (state == InterstageFairingState.JETTISONED)
             {
                 fairingBase.destroyFairing();
             }
@@ -807,12 +787,12 @@ namespace SSTUTools
 
         private void updateGuiState()
         {
-            bool showOpenActions = !deployed && !animating;
-            bool showCloseActions = deployed || animating;
+            bool showOpenActions = state == InterstageFairingState.RETRACTED || state == InterstageFairingState.RETRACTING;
+            bool showCloseActions = state == InterstageFairingState.DEPLOYED || state == InterstageFairingState.DEPLOYING;
             Events[nameof(deployEvent)].active = showOpenActions;//only available if not previously deployed or decoupled
-            Events[nameof(decoupleEvent)].active = deployed && !decoupled;//only available if deployed but not decoupled
+            Events[nameof(decoupleEvent)].active = state == InterstageFairingState.DEPLOYED && !decoupled;//only available if deployed but not decoupled
             Actions[nameof(deployAction)].active = showOpenActions;//only available if not previously deployed or decoupled
-            Actions[nameof(decoupleAction)].active = deployed && !decoupled;//only available if deployed but not decoupled
+            Actions[nameof(decoupleAction)].active = state == InterstageFairingState.DEPLOYED && !decoupled;//only available if deployed but not decoupled
 
             Events[nameof(retractEvent)].active = showCloseActions;
         }
@@ -823,7 +803,7 @@ namespace SSTUTools
             if (shield != null)
             {
                 string name = "InterstageFairingShield" + "" + part.Modules.IndexOf(this);
-                if (currentRotation<=0 && !animating)
+                if (state==InterstageFairingState.RETRACTED)
                 {
                     float top = currentHeight; ;
                     float bottom = 0f;
@@ -842,7 +822,7 @@ namespace SSTUTools
 
         private void updateTextureSet(bool useDefaults)
         {
-            TextureSet s = KSPShaderLoader.getTextureSet(currentTextureSet);
+            TextureSet s = TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
             RecoloringData[] colors = useDefaults ? s.maskColors : getSectionColors(string.Empty);
             fairingBase.enableTextureSet(currentTextureSet, colors);
             if (useDefaults)
@@ -888,6 +868,16 @@ namespace SSTUTools
                 }
             }
         }
+
+        public enum InterstageFairingState
+        {
+            RETRACTED,
+            DEPLOYING,
+            DEPLOYED,
+            RETRACTING,
+            JETTISONED
+        }
+
     }
 }
 

@@ -30,6 +30,35 @@ namespace SSTUTools
 
         public static void removeContainerUpdatedCallback(Action<SSTUVolumeContainer> cb) { containerUpdatedCallbacks.Remove(cb); }
 
+        public static void updateResourceVolume(Part part)
+        {
+            SSTULog.debug("Part volume changed...");
+            SSTUVolumeContainer vc = part.GetComponent<SSTUVolumeContainer>();
+            if (vc != null)
+            {
+                vc.recalcVolume();
+                SSTUResourceBoiloff rb = part.GetComponent<SSTUResourceBoiloff>();
+                if (rb != null) { rb.onPartResourcesChanged(); }
+            }
+            else
+            {
+                IContainerVolumeContributor[] contributors = part.FindModulesImplementing<IContainerVolumeContributor>().ToArray();
+                ContainerContribution[] cts;
+                int len = contributors.Length;
+                float totalVolume = 0;
+                for (int i = 0; i < len; i++)
+                {
+                    cts = contributors[i].getContainerContributions();
+                    int len2 = cts.Length;
+                    for (int k = 0; k < len2; k++)
+                    {
+                        totalVolume += cts[k].containerVolume;
+                    }
+                }
+                realFuelsVolumeUpdate(part, totalVolume);
+            }
+        }
+
         //RealFuels ModuleEngineConfigs compatibility for updating the 'scale' value of an engine
         public static void onEngineConfigChange(Part part, String config, float scale)
         {
@@ -86,22 +115,15 @@ namespace SSTUTools
         {
             if (HighLogic.LoadedSceneIsEditor || HighLogic.LoadedSceneIsFlight)
             {
-                List<IPartTextureUpdated> iptu = part.FindModulesImplementing<IPartTextureUpdated>();
-                int len = iptu.Count;
-                for (int i = 0; i < len; i++)
-                {
-                    iptu[i].textureUpdated(part);
-                }
+                TextureCallbacks.onTextureSetChanged(part);
             }
         }
 
         private static void partGeometryUpdate(Part part)
         {
-            List<IPartGeometryUpdated> ipgu = part.FindModulesImplementing<IPartGeometryUpdated>();
-            int len = ipgu.Count;
-            for (int i = 0; i < len; i++)
+            if (HighLogic.LoadedSceneIsEditor || HighLogic.LoadedSceneIsFlight)
             {
-                ipgu[i].geometryUpdated(part);
+                TextureCallbacks.onPartModelChanged(part);
             }
         }
 
@@ -139,14 +161,8 @@ namespace SSTUTools
             MonoBehaviour.print("-------------------------------------------------------------------------");
         }
 
-        public static bool onPartFuelVolumeUpdate(Part part, float liters)
+        private static bool realFuelsVolumeUpdate(Part part, float liters)
         {
-            SSTUVolumeContainer vc = part.GetComponent<SSTUVolumeContainer>();
-            if (vc != null)
-            {
-                vc.onVolumeUpdated(liters);
-                return true;
-            }
             Type moduleFuelTank = null;
             if (isRFInstalled())
             {

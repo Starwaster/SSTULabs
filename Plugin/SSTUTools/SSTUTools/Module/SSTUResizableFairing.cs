@@ -1,6 +1,7 @@
 ﻿using System;
 using UnityEngine;
 using KSPShaderTools;
+using System.Collections.Generic;
 
 namespace SSTUTools
 {
@@ -117,9 +118,9 @@ namespace SSTUTools
             updateModelScale();
             updateTextureSet(false);
             updateNodePositions(false);
-            this.updateUIFloatEditControl("currentDiameter", minDiameter, maxDiameter, diameterIncrement*2f, diameterIncrement, diameterIncrement*0.05f, true, currentDiameter);
-            Fields["currentDiameter"].uiControlEditor.onFieldChanged = onDiameterUpdated;
-            Fields["currentTextureSet"].uiControlEditor.onFieldChanged = onTextureUpdated;
+            this.updateUIFloatEditControl(nameof(currentDiameter), minDiameter, maxDiameter, diameterIncrement*2f, diameterIncrement, diameterIncrement*0.05f, true, currentDiameter);
+            Fields[nameof(currentDiameter)].uiControlEditor.onFieldChanged = onDiameterUpdated;
+            Fields[nameof(currentTextureSet)].uiControlEditor.onFieldChanged = onTextureUpdated;
             updateEditorFields();
         }
 
@@ -165,7 +166,7 @@ namespace SSTUTools
 
         public string[] getSectionNames()
         {
-            return new string[] { "Decoupler" };
+            return new string[] { "Fairing" };
         }
 
         public RecoloringData[] getSectionColors(string name)
@@ -182,7 +183,7 @@ namespace SSTUTools
         //IRecolorable override
         public TextureSet getSectionTexture(string section)
         {
-            return KSPShaderLoader.getTextureSet(currentTextureSet);
+            return TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
         }
 
         private void initialize()
@@ -194,15 +195,13 @@ namespace SSTUTools
 
             mpf = part.GetComponent<ModuleProceduralFairing>();
             ConfigNode node = SSTUConfigNodeUtils.parseConfigNode(configNodeData);
-
-            ConfigNode[] textureNodes = node.GetNodes("TEXTURESET");
-            string[] names = TextureSet.getTextureSetNames(textureNodes);
-            string[] titles = TextureSet.getTextureSetTitles(textureNodes);
-            TextureSet t = KSPShaderLoader.getTextureSet(currentTextureSet);
+            string[] names = node.GetStringValues("textureSet");
+            string[] titles = SSTUUtils.getNames(TexturesUnlimitedLoader.getTextureSets(names), m => m.title);
+            TextureSet t = TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
             if (t == null)
             {
                 currentTextureSet = names[0];
-                t = KSPShaderLoader.getTextureSet(currentTextureSet);
+                t = TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
                 initializedColors = false;
             }
             if (!initializedColors)
@@ -250,16 +249,18 @@ namespace SSTUTools
         private void updateTextureSet(bool useDefaults)
         {
             if (mpf == null) { return; }
-            TextureSet s = KSPShaderLoader.getTextureSet(currentTextureSet);
+            TextureSet s = TexturesUnlimitedLoader.getTextureSet(currentTextureSet);
             RecoloringData[] colors = useDefaults ? s.maskColors : getSectionColors(string.Empty);
             Material fm = mpf.FairingMaterial;
-            if (fm != null)
-            {
-                s.textureData[0].enable(fm, colors);
-            }
+            s.textureData[0].apply(fm);//TODO -- bit of an ugly hack; should at least pull a ref to whatever index that slot goes to
+            s.textureData[0].apply(mpf.FairingMaterial);
+            s.textureData[0].applyRecoloring(mpf.FairingMaterial, colors);
+            s.textureData[0].apply(mpf.FairingConeMaterial);
+            s.textureData[0].applyRecoloring(mpf.FairingConeMaterial, colors);
+            List<Transform> trs = new List<Transform>();
             foreach (ProceduralFairings.FairingPanel fp in mpf.Panels)
             {
-                s.enable(fp.go, colors);
+                s.enable(fp.go.transform, colors);
             }
             if (useDefaults)
             {
